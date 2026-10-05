@@ -4,6 +4,28 @@ This branch adds a local MCP workflow around this fork's existing `AuroraAirPoll
 
 The workflow provides pinned assets, versioned NO2/O3 recipes, four unified residual heads plus the unchanged baseline, bounded human-approved jobs, physical-unit evaluation, and an attributed [OKF knowledge bundle](knowledge/index.md). The canonical recipes use autonomous frozen-backbone rollouts; separately named historical forecast-forced recipes document their exogenous inputs. Replay, resume, warm-start and retraining are distinct modes. Mamba remains optional in the existing research runners and is disabled in the canonical spatial recipes.
 
+## Claude Code plugin quick start
+
+This installable plugin is on the non-default `agent_skills_to_finetune_aurora` branch. The recommended route is a branch clone so you can prepare and check the external data/MCP environment before Claude starts the server:
+
+```bash
+git clone --branch agent_skills_to_finetune_aurora --single-branch \
+  https://github.com/midatm1234/aurora.git aurora-plugin
+cd aurora-plugin
+WORKFLOW_VENV="${XDG_CACHE_HOME:-$HOME/.cache}/aurora-air-pollution/venv"
+WORKFLOW_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/aurora/workflow.json"
+python3.12 scripts/bootstrap_workflow.py --venv "$WORKFLOW_VENV" --data
+"$WORKFLOW_VENV/bin/python" -m aurora_workflow --config "$WORKFLOW_CONFIG" \
+  configure --workspace "$HOME/aurora-air-pollution-work"
+AURORA_WORKFLOW_VENV="$WORKFLOW_VENV" AURORA_WORKFLOW_CONFIG="$WORKFLOW_CONFIG" \
+  bin/aurora-mcp --check
+claude plugin validate .
+claude plugin marketplace add .
+claude plugin install aurora-air-pollution@aurora
+```
+
+The official branch-aware remote form is `claude plugin marketplace add midatm1234/aurora#agent_skills_to_finetune_aurora`, followed by `claude plugin install aurora-air-pollution@aurora`. Configure ADS credentials only in a protected local `.cdsapirc` and manually accept CAMS terms. See the [Claude Code plugin runbook](docs/claude-code-plugin.md) for Docker, Claude Desktop, platform limits, resource approval, examples and tests.
+
 Copy this handoff prompt into your local agent:
 
 > Read `AGENTS.md`, `.agents/skills/msresearch-aurora-air-pollution/SKILL.md`, and `knowledge/index.md`. Inspect the checked-out commit, environment, available datasets, baseline outputs, trained checkpoints, and run manifests. Follow `docs/agent-workflow.md` to propose the necessary local setup and register the stdio MCP server. Prefer verified artifact reuse. Ask me to choose replay, resume, reproduce training, or evaluation and select the recipe/head. Use MCP to make a bounded plan, have me approve that exact plan in my terminal, and execute or recover it through MCP. Report actual validation, provenance, missing artifacts, and mixed/negative metrics honestly. Do not substitute weather weights or claim historical reproduction from synthetic tests.

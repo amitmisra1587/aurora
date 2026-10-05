@@ -1,0 +1,6 @@
+# CAMS acquisition and data preparation without importing the model.
+-r workflow-light.txt
+numpy==2.4.6
+xarray==2026.4.0
+netCDF4==1.7.4
+cdsapi==0.7.7

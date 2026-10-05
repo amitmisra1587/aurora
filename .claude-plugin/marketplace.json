@@ -1,0 +1,17 @@
+{
+  "name": "aurora",
+  "owner": {
+    "name": "midatm1234",
+    "url": "https://github.com/midatm1234"
+  },
+  "metadata": {
+    "description": "Research plugins for reproducible Aurora air-pollution workflows."
+  },
+  "plugins": [
+    {
+      "name": "aurora-air-pollution",
+      "source": "./",
+      "description": "Acquire CAMS data and run approved, reproducible AuroraAirPollution workflows locally."
+    }
+  ]
+}

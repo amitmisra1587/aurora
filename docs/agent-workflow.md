@@ -2,6 +2,18 @@
 
 This branch wraps the existing fork implementation. Read [AGENTS.md](../AGENTS.md), the [canonical skill](../.agents/skills/msresearch-aurora-air-pollution/SKILL.md), and [knowledge/index.md](../knowledge/index.md). A branch URL supplies code and recipes; it does not supply a GPU, ADS permission/credentials, operational CAMS data or unpublished refinement checkpoints.
 
+## Claude Code plugin
+
+For Claude Code CLI or its VS Code extension, prefer the installable
+[Aurora marketplace plugin](claude-code-plugin.md). This branch is
+non-default: use `claude plugin marketplace add
+midatm1234/aurora#agent_skills_to_finetune_aurora` or clone it explicitly with
+`git clone --branch agent_skills_to_finetune_aurora --single-branch
+https://github.com/midatm1234/aurora.git aurora-plugin`. Configure the local
+external environment before starting the bundled MCP server. Do not also
+register the repository's separate `aurora_air_pollution` Claude MCP entry
+when the plugin is enabled; that would start the same backend twice.
+
 ## Clean-machine setup
 
 After reviewing and approving local setup, clone the intended branch and create the lightweight environment. Use Python 3.12–3.14 compatible with the pinned requirements; the tested Python/package versions are recorded by environment preflight and the implementation validation report.
@@ -40,7 +52,7 @@ Use the absolute environment Python, an editable fork installation, and an absol
 | Client surface | Skill discovery/entry | MCP registration |
 | --- | --- | --- |
 | Codex local CLI / IDE extension | Canonical `.agents/skills`; root AGENTS.md | `~/.codex/config.toml`, table `mcp_servers` |
-| Claude Code local CLI | CLAUDE.md imports AGENTS.md; `.claude/skills` symlink points to canonical skill | Local `claude mcp add`, or reviewed project `.mcp.json` with `mcpServers` |
+| Claude Code CLI / VS Code extension | Installed plugin's focused skills; checkout also retains canonical `.claude/skills` adapter | Plugin `.mcp.json` and `${CLAUDE_PLUGIN_ROOT}` launcher |
 | GitHub Copilot in VS Code | `.github/copilot-instructions.md` and canonical `.agents/skills` | `.vscode/mcp.json` with `servers` |
 
 These are different configuration formats. GitHub cloud coding agents, browser-only clients and hosted GPU/server deployment are not covered by these local registration examples.
@@ -54,7 +66,7 @@ codex mcp list
 
 Restart the session when required by the client and inspect the server/tool list. The current official [Codex MCP guide](https://developers.openai.com/codex/mcp/) documents local stdio registration; the [skill guide](https://developers.openai.com/codex/skills/) documents `.agents/skills` discovery.
 
-For Claude Code, use local scope to keep machine-specific paths out of tracked project files:
+For Claude Code without the plugin, use local scope to keep machine-specific paths out of tracked project files. Do not use this additional server registration when the plugin's bundled MCP server is enabled:
 
 ```bash
 claude mcp add --transport stdio --scope local aurora_air_pollution -- /absolute/path/aurora/.venv-workflow/bin/python -m aurora_workflow.mcp_server --config /absolute/path/aurora-local.json

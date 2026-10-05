@@ -8,7 +8,7 @@ import platform
 import shutil
 import subprocess
 import sys
-from .common import REPO, artifact, atomic_json, read_json, redact, source_fingerprint, utcnow
+from .common import REPO, ads_credentials_present, artifact, atomic_json, read_json, redact, source_fingerprint, utcnow
 from .settings import Settings
 
 
@@ -48,8 +48,7 @@ def doctor(settings: Settings, *, check_torch: bool = False) -> dict:
             "dependencies": versions, "aurora_import": spec.origin if spec else None,
             "fork_import_verified": fork, "roots": roots, "gpu": gpu,
             "memory_bytes": os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES"),
-            "credentials_present": {"ads_local_config": Path(os.environ.get("CDSAPI_RC", "~/.cdsapirc")).expanduser().is_file(),
-                                    "ads_environment": bool(os.environ.get("CDSAPI_KEY"))},
+            "credentials_present": ads_credentials_present(),
             "warnings": ["Credential presence does not establish ADS access or acceptance of data terms.",
                          "GPU capability and checkpoint compatibility must also pass before scientific execution."]}
 

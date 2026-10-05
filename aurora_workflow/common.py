@@ -94,6 +94,19 @@ def _local_credential_values() -> tuple[str, ...]:
     return ()
 
 
+def ads_credentials_present() -> dict[str, bool]:
+    """Report credential presence only; never return or log the configured token."""
+    environment = bool(os.environ.get("CDSAPI_KEY", "").strip())
+    try:
+        import yaml
+        path = Path(os.environ.get("CDSAPI_RC", "~/.cdsapirc")).expanduser()
+        config = yaml.safe_load(path.read_text()) if path.is_file() and path.stat().st_size <= 16384 else None
+        local = isinstance(config, dict) and isinstance(config.get("key"), str) and bool(config["key"].strip())
+    except (OSError, ValueError, ImportError):
+        local = False
+    return {"ads_local_config": bool(local), "ads_environment": environment}
+
+
 def redact(value: Any) -> Any:
     """Never persist credential-bearing exception text, URLs, or configuration fields."""
     if isinstance(value, dict):
@@ -126,9 +139,16 @@ def source_fingerprint() -> dict:
     paths = sorted(p for directory in ("aurora_workflow", "aurora", "finetune", "recipes", "provenance")
                    for p in (REPO / directory).rglob("*")
                    if p.is_file() and p.suffix in {".py", ".yaml", ".json"})
-    return {"commit": git("rev-parse", "HEAD"),
+    try:
+        commit = git("rev-parse", "HEAD")
+        dirty = bool(git("status", "--porcelain"))
+    except (OSError, subprocess.SubprocessError):
+        # Plugin caches and source archives can omit .git; hash packaged code
+        # rather than preventing inspection or silently inventing a commit.
+        commit, dirty = None, None
+    return {"commit": commit,
             "code_hash": digest({str(p.relative_to(REPO)): sha256(p) for p in paths}),
-            "dirty": bool(git("status", "--porcelain")), "imported_workflow_path": str(REPO)}
+            "dirty": dirty, "imported_workflow_path": str(REPO)}
 
 
 def environment_fingerprint() -> dict:

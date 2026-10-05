@@ -1,5 +1,7 @@
 """Synthetic CAMS contract tests; no ADS credentials or network access."""
 import json
+import sys
+import types
 import zipfile
 from pathlib import Path
 
@@ -8,7 +10,7 @@ import pytest
 import xarray as xr
 
 from aurora_workflow.data import (
-    LEVELS, VARIABLES, audit_history, canonicalize_cams, fit_training_statistics,
+    LEVELS, VARIABLES, acquire, audit_history, canonicalize_cams, fit_training_statistics,
     plan_cams, prepare, resolve_data_spec, safe_extract, split_cases,
 )
 
@@ -56,6 +58,84 @@ def test_unavailable_old_date_and_bounds():
         plan_cams({"start_date": "2014-07-01", "end_date": "2014-07-01"})
     with pytest.raises(ValueError, match="request"):
         plan_cams({"start_date": "2024-07-01", "end_date": "2024-07-01"}, {"max_requests": 1})
+
+
+def test_dateline_crossing_refinement_domain_is_rejected_explicitly():
+    with pytest.raises(ValueError, match="Invalid target domain"):
+        plan_cams({"start_date": "2024-07-01", "end_date": "2024-07-01",
+                   "domain": {"north": 50, "west": 170, "south": 30, "east": -170},
+                   "target_variables": ["tcno2"], "target_levels": [1000]})
+
+
+def test_acquisition_requires_local_credentials_without_revealing_values(tmp_path, monkeypatch):
+    monkeypatch.delenv("CDSAPI_KEY", raising=False)
+    monkeypatch.setenv("CDSAPI_RC", str(tmp_path / "missing-ads-config"))
+    with pytest.raises(PermissionError, match="local ADS personal access token"):
+        acquire({"start_date": "2024-07-01", "end_date": "2024-07-01"},
+                tmp_path / "cache", {"max_requests": 3, "max_download_bytes": 10_000_000_000})
+
+
+def test_unaccepted_terms_fail_clearly_without_leaking_credentials(tmp_path, monkeypatch):
+    monkeypatch.setenv("CDSAPI_KEY", "private-fixture-token")
+
+    class Client:
+        def __init__(self, **_kwargs):
+            pass
+
+        def retrieve(self, _product, _request):
+            raise RuntimeError("dataset terms have not been accepted")
+
+    monkeypatch.setitem(sys.modules, "cdsapi", types.SimpleNamespace(Client=Client))
+    with pytest.raises(RuntimeError, match="check local credentials, terms, and availability") as error:
+        acquire({"start_date": "2024-07-01", "end_date": "2024-07-01"},
+                tmp_path / "cache", {"max_requests": 3, "max_download_bytes": 10_000_000_000,
+                                     "retries": 0})
+    assert "private-fixture-token" not in str(error.value)
+    assert "dataset terms" not in str(error.value)
+
+
+def test_partial_download_is_removed_and_never_receipted(tmp_path, monkeypatch):
+    monkeypatch.setenv("CDSAPI_KEY", "private-fixture-token")
+    from aurora_workflow.data import plan_cams
+
+    class Result:
+        location = "https://ads.atmosphere.copernicus.eu/result"
+        content_length = 8
+
+    class Client:
+        def __init__(self, **_kwargs):
+            pass
+
+        def retrieve(self, _product, _request):
+            return Result()
+
+    class Response:
+        is_redirect = False
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def raise_for_status(self):
+            pass
+
+        def iter_content(self, _size):
+            yield b"partial"
+            raise ConnectionError("network interrupted fixture")
+
+    monkeypatch.setitem(sys.modules, "cdsapi", types.SimpleNamespace(Client=Client))
+    monkeypatch.setitem(sys.modules, "requests", types.SimpleNamespace(get=lambda *_a, **_k: Response()))
+    spec = {"start_date": "2024-07-01", "end_date": "2024-07-01"}
+    limits = {"max_requests": 3, "max_download_bytes": 10_000_000_000, "retries": 0}
+    acquisition = plan_cams(spec, limits)
+    with pytest.raises(RuntimeError, match="ADS request failed"):
+        acquire(spec, tmp_path / "cache", limits)
+    partial_dir = tmp_path / "cache" / acquisition["requests"][0]["request_id"]
+    assert not (partial_dir / "data.zip").exists()
+    assert not (partial_dir / "data.zip.partial").exists()
+    assert not (partial_dir / "receipt.json").exists()
 
 
 def test_sparse_real_planning_and_versioned_validation_dates():

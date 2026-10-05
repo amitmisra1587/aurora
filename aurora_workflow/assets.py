@@ -3,21 +3,32 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import shutil
+import subprocess
 from .common import REPO, artifact, atomic_json, git, read_json, sha256
 
 
 def verify_source_references() -> dict:
     lock = read_json(REPO / "provenance/source-lock.json")
     source = lock["fork"]["source_commit"]
-    if git("merge-base", source, "HEAD") != source:
-        raise ValueError("Implementation is not descended from the pinned fork source")
+    try:
+        if git("merge-base", source, "HEAD") != source:
+            raise ValueError("Implementation is not descended from the pinned fork source")
+        ancestry = "verified"
+    except (OSError, subprocess.SubprocessError):
+        if (REPO / ".git").exists():
+            raise
+        ancestry = "unavailable_in_packaged_checkout"
     import importlib.util
     spec = importlib.util.find_spec("aurora")
     if spec is None or Path(spec.origin).resolve().parent != REPO / "aurora":
         raise ValueError("Another aurora package shadows the intended fork")
     return {"state": "succeeded", "fork_source": source,
             "upstream_reference": lock["upstream"], "imported_aurora_path": spec.origin,
-            "verification": "git ancestry and import resolution checked; upstream reference is not installed"}
+            "verification": ("git ancestry and import resolution checked; upstream reference is not installed"
+                             if ancestry == "verified" else
+                             "packaged source and import resolution checked; git ancestry unavailable "
+                             "in this plugin checkout; upstream reference is not installed"),
+            "git_ancestry": ancestry}
 
 
 def inspect_assets(registry: dict) -> dict:

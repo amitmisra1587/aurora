@@ -14,6 +14,7 @@ import zipfile
 from contextlib import ExitStack
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from .common import ads_credentials_present
 
 PRODUCT = "cams-global-atmospheric-composition-forecasts"
 ADS_URL = "https://ads.atmosphere.copernicus.eu/api"
@@ -276,6 +277,11 @@ def acquire(spec: dict, cache_root: Path, limits: dict) -> dict:
     only for the ADS service's ECMWF object-store hosts, never from a tool argument.
     """
     acquisition = plan_cams(spec, limits)
+    if not any(ads_credentials_present().values()):
+        raise PermissionError(
+            "CAMS acquisition requires a local ADS personal access token. "
+            "Configure CDSAPI_RC (default ~/.cdsapirc) or CDSAPI_KEY and manually accept the dataset terms."
+        )
     import cdsapi
     import requests
     from urllib.parse import urlparse

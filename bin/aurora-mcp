@@ -1,0 +1,97 @@
+#!/bin/sh
+set -eu
+
+ROOT="$(CDPATH= cd "$(dirname "$0")/.." && pwd)"
+CONFIG="${AURORA_WORKFLOW_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/aurora/workflow.json}"
+CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/aurora-air-pollution"
+VENV="${AURORA_WORKFLOW_VENV:-$CACHE/venv}"
+ACTION="${1:-serve}"
+
+usage() {
+  cat <<'EOF'
+Usage: bin/aurora-mcp [--install | --check | --config PATH]
+
+--install     Create/reuse the external, pinned data/MCP environment.
+--check       Run doctor without starting MCP or installing packages.
+--config PATH Use an external local workflow configuration.
+EOF
+}
+
+die() {
+  printf '[aurora-mcp] %s\n' "$*" >&2
+  exit 2
+}
+
+case "$ACTION" in
+  --help|-h)
+    usage
+    exit 0
+    ;;
+  --config)
+    [ "$#" -eq 2 ] || die "--config requires a path"
+    CONFIG="$2"
+    ACTION="serve"
+    ;;
+  --install|--check)
+    [ "$#" -eq 1 ] || die "Unexpected arguments; see --help"
+    ;;
+  serve)
+    [ "$#" -eq 0 ] || die "Unexpected arguments; see --help"
+    ;;
+  *)
+    die "Unknown option: $ACTION"
+    ;;
+esac
+
+if [ -n "${AURORA_WORKFLOW_DOCKER_IMAGE:-}" ]; then
+  command -v docker >/dev/null 2>&1 || die "Docker mode is enabled but docker was not found."
+  [ -n "${AURORA_WORKSPACE:-}" ] && [ -d "$AURORA_WORKSPACE" ] ||
+    die "Set AURORA_WORKSPACE to the host directory mounted as /workspace."
+  [ -n "${AURORA_WORKFLOW_DOCKER_CONFIG:-}" ] && [ -f "$AURORA_WORKFLOW_DOCKER_CONFIG" ] ||
+    die "Set AURORA_WORKFLOW_DOCKER_CONFIG to the container-path config created by the runbook."
+
+  set -- docker run --rm -i --init \
+    --user "$(id -u):$(id -g)" \
+    --mount "type=bind,src=$(CDPATH= cd "$AURORA_WORKSPACE" && pwd),dst=/workspace" \
+    --mount "type=bind,src=$(CDPATH= cd "$(dirname "$AURORA_WORKFLOW_DOCKER_CONFIG")" && pwd)/$(basename "$AURORA_WORKFLOW_DOCKER_CONFIG"),dst=/config/workflow.json,readonly" \
+    -e AURORA_WORKFLOW_CONFIG=/config/workflow.json \
+    -e CDSAPI_RC=/config/ads.credentials \
+    -e HOME=/tmp
+  ads_config="${CDSAPI_RC:-$HOME/.cdsapirc}"
+  if [ -f "$ads_config" ]; then
+    set -- "$@" --mount "type=bind,src=$(CDPATH= cd "$(dirname "$ads_config")" && pwd)/$(basename "$ads_config"),dst=/config/ads.credentials,readonly"
+  fi
+  set -- "$@" "$AURORA_WORKFLOW_DOCKER_IMAGE"
+  if [ "$ACTION" != "serve" ]; then
+    set -- "$@" "$ACTION"
+  fi
+  exec "$@"
+fi
+
+if [ "$ACTION" = "--install" ]; then
+  python_bin=""
+  for candidate in "${AURORA_PYTHON:-}" python3.12 python3.13 python3.14 python3; do
+    [ -n "$candidate" ] || continue
+    if command -v "$candidate" >/dev/null 2>&1 &&
+       "$candidate" -c 'import sys; sys.exit(0 if (3, 12) <= sys.version_info[:2] <= (3, 14) else 1)' 2>/dev/null; then
+      python_bin="$(command -v "$candidate")"
+      break
+    fi
+  done
+  [ -n "$python_bin" ] || die "Install Python 3.12–3.14 or set AURORA_PYTHON to its executable."
+  exec "$python_bin" "$ROOT/scripts/bootstrap_workflow.py" --venv "$VENV" --data
+fi
+
+python_bin="$VENV/bin/python"
+[ -x "$python_bin" ] ||
+  die "Workflow environment is missing. Run '$ROOT/bin/aurora-mcp --install' first."
+"$python_bin" -c 'import mcp, pydantic' 2>/dev/null ||
+  die "Pinned MCP dependencies are missing. Run '$ROOT/bin/aurora-mcp --install' or select a valid AURORA_WORKFLOW_VENV."
+[ -f "$CONFIG" ] ||
+  die "Local config not found at $CONFIG. Configure it with: $python_bin -m aurora_workflow --config '$CONFIG' configure --workspace /absolute/path/to/aurora-workspace"
+
+export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
+if [ "$ACTION" = "--check" ]; then
+  exec "$python_bin" -m aurora_workflow --config "$CONFIG" doctor
+fi
+exec "$python_bin" -m aurora_workflow.mcp_server --config "$CONFIG"

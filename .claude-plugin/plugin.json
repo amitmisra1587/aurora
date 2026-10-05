@@ -1,0 +1,15 @@
+{
+  "name": "aurora-air-pollution",
+  "displayName": "Aurora Air Pollution",
+  "version": "0.1.0",
+  "description": "Reproducible CAMS-to-AuroraAirPollution workflows on local compute.",
+  "author": {
+    "name": "midatm1234",
+    "url": "https://github.com/midatm1234"
+  },
+  "homepage": "https://github.com/midatm1234/aurora/tree/agent_skills_to_finetune_aurora",
+  "repository": "https://github.com/midatm1234/aurora",
+  "skills": [
+    "./skills/"
+  ]
+}

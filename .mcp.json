@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "aurora-air-pollution": {
+      "command": "${CLAUDE_PLUGIN_ROOT}/bin/aurora-mcp",
+      "args": []
+    }
+  }
+}
