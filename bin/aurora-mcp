@@ -2,18 +2,19 @@
 set -eu
 
 ROOT="$(CDPATH= cd "$(dirname "$0")/.." && pwd)"
-CONFIG="${AURORA_WORKFLOW_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/aurora/workflow.json}"
-CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/aurora-air-pollution"
-VENV="${AURORA_WORKFLOW_VENV:-$CACHE/venv}"
 ACTION="${1:-serve}"
 
 usage() {
   cat <<'EOF'
-Usage: bin/aurora-mcp [--install | --check | --config PATH]
+Usage: bin/aurora-mcp [--install | --check | --config PATH | --approve PLAN_ID]
 
---install     Create/reuse the external, pinned data/MCP environment.
---check       Run doctor without starting MCP or installing packages.
+--install     Prepare/reuse the minimal external MCP environment and configuration.
+--check       Prepare the minimal setup and run doctor without starting MCP.
 --config PATH Use an external local workflow configuration.
+--approve ID  Human-only interactive approval using the same setup and configuration.
+
+Normal startup connects immediately and prepares minimal dependencies in the background.
+Settings: ~/.config/aurora/launcher.json; see docs/claude-code-plugin.md.
 EOF
 }
 
@@ -27,10 +28,14 @@ case "$ACTION" in
     usage
     exit 0
     ;;
-  --config)
-    [ "$#" -eq 2 ] || die "--config requires a path"
-    CONFIG="$2"
-    ACTION="serve"
+  --config|--approve)
+    [ "$#" -eq 2 ] || die "$ACTION requires an argument"
+    if [ "$ACTION" = "--config" ]; then
+      export AURORA_WORKFLOW_CONFIG="$2"
+      ACTION="serve"
+    else
+      export AURORA_APPROVE_PLAN="$2"
+    fi
     ;;
   --install|--check)
     [ "$#" -eq 1 ] || die "Unexpected arguments; see --help"
@@ -64,34 +69,26 @@ if [ -n "${AURORA_WORKFLOW_DOCKER_IMAGE:-}" ]; then
   set -- "$@" "$AURORA_WORKFLOW_DOCKER_IMAGE"
   if [ "$ACTION" != "serve" ]; then
     set -- "$@" "$ACTION"
+    if [ "$ACTION" = "--approve" ]; then
+      set -- "$@" "$AURORA_APPROVE_PLAN"
+    fi
   fi
   exec "$@"
 fi
 
-if [ "$ACTION" = "--install" ]; then
-  python_bin=""
-  for candidate in "${AURORA_PYTHON:-}" python3.12 python3.13 python3.14 python3; do
+python_bin=""
+if [ -n "${AURORA_PYTHON:-}" ]; then
+  candidates="$AURORA_PYTHON"
+else
+  candidates=""
+fi
+for candidate in "$candidates" "${AURORA_WORKFLOW_VENV:+$AURORA_WORKFLOW_VENV/bin/python}" python3.12 python3.13 python3.14 python3 python; do
     [ -n "$candidate" ] || continue
     if command -v "$candidate" >/dev/null 2>&1 &&
        "$candidate" -c 'import sys; sys.exit(0 if (3, 12) <= sys.version_info[:2] <= (3, 14) else 1)' 2>/dev/null; then
       python_bin="$(command -v "$candidate")"
       break
     fi
-  done
-  [ -n "$python_bin" ] || die "Install Python 3.12–3.14 or set AURORA_PYTHON to its executable."
-  exec "$python_bin" "$ROOT/scripts/bootstrap_workflow.py" --venv "$VENV" --data
-fi
-
-python_bin="$VENV/bin/python"
-[ -x "$python_bin" ] ||
-  die "Workflow environment is missing. Run '$ROOT/bin/aurora-mcp --install' first."
-"$python_bin" -c 'import mcp, pydantic' 2>/dev/null ||
-  die "Pinned MCP dependencies are missing. Run '$ROOT/bin/aurora-mcp --install' or select a valid AURORA_WORKFLOW_VENV."
-[ -f "$CONFIG" ] ||
-  die "Local config not found at $CONFIG. Configure it with: $python_bin -m aurora_workflow --config '$CONFIG' configure --workspace /absolute/path/to/aurora-workspace"
-
-export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
-if [ "$ACTION" = "--check" ]; then
-  exec "$python_bin" -m aurora_workflow --config "$CONFIG" doctor
-fi
-exec "$python_bin" -m aurora_workflow.mcp_server --config "$CONFIG"
+done
+[ -n "$python_bin" ] || die "Python 3.12–3.14 is missing from this client's PATH. Install Python with venv/pip support, restart the client, or set AURORA_PYTHON to its absolute executable in the MCP environment. Then reconnect; no clone or manual environment is needed."
+exec "$python_bin" "$ROOT/scripts/launch_workflow.py" "$ACTION"

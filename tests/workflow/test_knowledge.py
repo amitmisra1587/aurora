@@ -213,10 +213,12 @@ def test_client_registration_examples_share_server_and_use_distinct_schemas():
     assert set(vscode) == {"servers"}
     entries = [codex["mcp_servers"]["aurora_air_pollution"], claude["mcpServers"]["aurora_air_pollution"], vscode["servers"]["aurora_air_pollution"]]
     for entry in entries:
-        assert Path(entry["command"]).is_absolute()
-        assert entry["args"][:3] == ["-m", "aurora_workflow.mcp_server", "--config"]
-        assert Path(entry["args"][3]).is_absolute()
+        assert entry["command"].endswith("/bin/aurora-mcp")
+        assert entry["args"] == []
         assert "env" not in entry  # No example credentials.
+    assert Path(entries[0]["command"]).is_absolute()
+    assert Path(entries[1]["command"]).is_absolute()
+    assert entries[2]["command"] == "${workspaceFolder}/bin/aurora-mcp"
     assert entries[1]["type"] == entries[2]["type"] == "stdio"
 
 

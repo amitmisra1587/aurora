@@ -36,7 +36,7 @@ The workflow inventory maps existing notebooks/scripts, actual APIs, checkpoint 
 
 ## Setup and exact selections
 
-Follow [the onboarding guide](agent-workflow.md) for the clone/setup/credentials/registration/approval sequence, including separate examples for **Codex local CLI/IDE**, **Claude Code local CLI**, and **GitHub Copilot in VS Code**. The canonical skill is `.agents/skills/msresearch-aurora-air-pollution/SKILL.md`; AGENTS.md, CLAUDE.md and Copilot instructions route to it. Python 3.12–3.14 is supported by the bootstrap; lightweight inspection does not require model dependencies.
+Follow [the onboarding guide](agent-workflow.md) for current setup/credentials/registration/approval instructions, including the clone-free Claude Code plugin and checkout-based **Codex local CLI/IDE** and **GitHub Copilot in VS Code** routes. The canonical skill is `.agents/skills/msresearch-aurora-air-pollution/SKILL.md`; AGENTS.md, CLAUDE.md and Copilot instructions route to it. Python 3.12–3.14 is supported by the bootstrap; lightweight inspection does not require model dependencies. The later [onboarding validation record](onboarding-validation.md) supplements the historical scientific checks below.
 
 ```bash
 python3.12 scripts/bootstrap_workflow.py --venv .venv-science --science
@@ -44,7 +44,7 @@ python3.12 scripts/bootstrap_workflow.py --venv .venv-science --science
 .venv-science/bin/python -m aurora_workflow --config /absolute/aurora-local.json doctor --check-torch
 ```
 
-The CPU bootstrap uses pinned PyTorch CPU wheels. Choose and verify a compatible CUDA environment separately for real GPU work; the source checkout must be installed editable with `--no-deps` so upstream/PyPI code does not replace this fork. Use its absolute Python in the client's registration example. Credentials stay in approved local ADS configuration/environment.
+The CPU bootstrap uses pinned PyTorch CPU wheels. Choose and verify a compatible CUDA environment separately for real GPU work. The current launcher imports the packaged fork through `PYTHONPATH`; plugin installs use `--no-project` and do not need an editable package build. Manual editable installs with `--no-deps` remain available. Client examples register the launcher. Credentials stay in approved local ADS configuration/environment.
 
 Exact MCP planning requests for the four required choices (each result has its own run identifier):
 

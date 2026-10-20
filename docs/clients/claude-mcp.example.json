@@ -2,8 +2,8 @@
   "mcpServers": {
     "aurora_air_pollution": {
       "type": "stdio",
-      "command": "/absolute/path/aurora/.venv-workflow/bin/python",
-      "args": ["-m", "aurora_workflow.mcp_server", "--config", "/absolute/path/aurora-local.json"]
+      "command": "/absolute/path/aurora/bin/aurora-mcp",
+      "args": []
     }
   }
 }

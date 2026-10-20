@@ -1,81 +1,75 @@
-# Reproduce Aurora air-pollution workflows on your resources
+# Use the Aurora workflow with your agent
 
-This branch wraps the existing fork implementation. Read [AGENTS.md](../AGENTS.md), the [canonical skill](../.agents/skills/msresearch-aurora-air-pollution/SKILL.md), and [knowledge/index.md](../knowledge/index.md). A branch URL supplies code and recipes; it does not supply a GPU, ADS permission/credentials, operational CAMS data or unpublished refinement checkpoints.
+The branch supplies code, skills, recipes and [OKF knowledge](../knowledge/index.md). You supply compute, ADS access and any unpublished trained checkpoint. [AGENTS.md](../AGENTS.md) routes all clients to one [canonical scientific skill](../.agents/skills/msresearch-aurora-air-pollution/SKILL.md). Thin client adapters carry discovery and routing, without duplicating model procedures.
 
-## Claude Code plugin
+## Start here
 
-For Claude Code CLI or its VS Code extension, prefer the installable
-[Aurora marketplace plugin](claude-code-plugin.md). This branch is
-non-default: use `claude plugin marketplace add
-midatm1234/aurora#agent_skills_to_finetune_aurora` or clone it explicitly with
-`git clone --branch agent_skills_to_finetune_aurora --single-branch
-https://github.com/midatm1234/aurora.git aurora-plugin`. Configure the local
-external environment before starting the bundled MCP server. Do not also
-register the repository's separate `aurora_air_pollution` Claude MCP entry
-when the plugin is enabled; that would start the same backend twice.
+Claude Code CLI and VS Code users should follow the [two-command README install](../README.md#install-in-claude-code); no clone or manual environment is required. The [Claude runbook](claude-code-plugin.md) explains default paths, first-run status, scientific dependency profiles, Docker and recovery.
 
-## Clean-machine setup
-
-After reviewing and approving local setup, clone the intended branch and create the lightweight environment. Use Python 3.12–3.14 compatible with the pinned requirements; the tested Python/package versions are recorded by environment preflight and the implementation validation report.
+For other local clients, **run in a terminal**:
 
 ```bash
-git clone --branch agent_skills_to_finetune_aurora --single-branch https://github.com/midatm1234/aurora.git
+git clone --branch agent_skills_to_finetune_aurora --single-branch \
+  https://github.com/midatm1234/aurora.git
 cd aurora
-python scripts/bootstrap_workflow.py --venv .venv-workflow
+bin/aurora-mcp --check
 ```
 
-The clone command applies after the branch has actually been published. For a local handoff, use the existing checked-out branch or a Git bundle. Check its resolved commit before running setup; [provenance/source-lock.json](../provenance/source-lock.json) identifies source lineage. Keep the fork as the imported package. The weather starter project and PyPI-only replacement are not this workflow.
+Requirements: Git, Python 3.12–3.14 with venv/pip, network access and writable external storage. The launcher prepares only the pinned metadata/MCP environment and creates a missing external config. It works from any working directory and uses the packaged fork rather than a PyPI/weather substitute. Default locations and optional persistent `launcher.json` overrides are in the [runbook](claude-code-plugin.md#paths-and-environments).
 
-The lightweight environment supports metadata/knowledge/MCP inspection. For CPU synthetic science checks, approve the larger dependency installation and add `--science` to the initial bootstrap command. Bootstrap preserves existing environments: if the lightweight environment already exists, create a distinct environment such as `.venv-science` with `--science` and register that Python for scientific execution. Real GPU work additionally needs a compatible CUDA-enabled PyTorch environment and sufficient local device memory; doctor reports actual availability. The documented worker runs on Linux with local CPU/CUDA resources. Native Windows/macOS worker management, hosted services and cluster schedulers are not validated.
+First call `setup_status`, then `inspect_environment`, `inspect_assets`, `list_runs` and `knowledge_validate`. An empty machine is valid: missing data/checkpoints and science packages are reported prerequisites. Setup success means connected tools and inspected roots, not scientific execution. Select/install larger environments only for requested data, CPU analysis/fixtures or CUDA science; preserve compatible artifacts and existing configuration.
 
-Configure a dedicated workspace and local configuration, using your own absolute paths:
+## Client setup
+
+These routes run the same **local stdio** launcher. MCP is not skill installation, and OKF readability is not proof of either. The [validation record](onboarding-validation.md) distinguishes static checks, actual SDK traffic and client applications.
+
+### Claude Code CLI and VS Code extension
+
+Use the marketplace plugin. Namespaced skills live in packaged `skills/`, referring to canonical `.agents/skills/` instructions and `knowledge/` inside the same plugin. The `mcpServers` field in `.claude-plugin/plugin.json` registers `${CLAUDE_PLUGIN_ROOT}/bin/aurora-mcp` automatically. The extension shares CLI installations; restart its session after changes. Check `/plugin`, `/aurora-air-pollution:aurora-setup`, `/mcp`, then make inspection calls.
+
+Without the plugin, a checkout exposes the canonical skill through `.claude/skills/msresearch-aurora-air-pollution`, a symlink to `.agents/skills/...`. Relative reference links must be resolved against the **real canonical directory**. If a checkout loses symlinks or a host resolves links against the adapter path, read `CLAUDE.md` / `AGENTS.md` and the canonical file directly; do not claim automatic discovery in that environment. The plugin's five regular-file skills avoid symlink dependency.
+
+For this manual route only, **terminal**, from any directory:
 
 ```bash
-.venv-workflow/bin/python -m aurora_workflow --config /absolute/path/aurora-local.json configure --workspace /absolute/path/aurora-workspace
-.venv-workflow/bin/python -m aurora_workflow --config /absolute/path/aurora-local.json doctor
-```
-
-Configuration defines independent `data_root`, `cache_root`, `output_root`, `state_root`, optional `read_roots` and an asset registry. Keep local configuration outside version control. Credentials belong in the locally configured ADS client environment/configuration, never in chat, recipes or reports. Read the current [ADS setup instructions](https://ads.atmosphere.copernicus.eu/how-to-api) and accept the selected product's access conditions in your own account. The tool checks credential presence without revealing values. Supply trained checkpoints as trusted local artifacts with checksums/architecture metadata; inaccessible historical checkpoints remain `requires_artifact`.
-
-Doctor checks the Python/dependency environment, imported fork path, CUDA/GPU, memory/storage, credential presence and available asset metadata. Compatibility is also checked against the effective recipe before checkpoint loading. Use `doctor --check-torch` in the scientific environment to query actual PyTorch CUDA availability; the lightweight doctor avoids importing PyTorch by default. No expensive download or training is authorized by passing preflight.
-
-## Register one supported local client
-
-The same server runs on the recipient's machine:
-
-```text
-/absolute/path/aurora/.venv-workflow/bin/python -m aurora_workflow.mcp_server --config /absolute/path/aurora-local.json
-```
-
-Use the absolute environment Python, an editable fork installation, and an absolute local config path. Stdout is MCP protocol traffic; diagnostic logs go to stderr. The examples below were checked against separately fetched official documentation and are parsed/validated by repository tests. MCP SDK initialization/dispatch is tested separately. The local Codex CLI `0.154.0-alpha.6.2` also passed a read-only, per-invocation registration check using `mcp list --json` with explicit command/args; it recognized the enabled stdio entry without changing user configuration. The official MCP Python SDK `1.30.0` separately initialized this server with protocol `2025-11-25` and discovered 24 typed tools. This does not claim a paid/client-agent session or a Claude Code/VS Code application handshake.
-
-| Client surface | Skill discovery/entry | MCP registration |
-| --- | --- | --- |
-| Codex local CLI / IDE extension | Canonical `.agents/skills`; root AGENTS.md | `~/.codex/config.toml`, table `mcp_servers` |
-| Claude Code CLI / VS Code extension | Installed plugin's focused skills; checkout also retains canonical `.claude/skills` adapter | Plugin `.mcp.json` and `${CLAUDE_PLUGIN_ROOT}` launcher |
-| GitHub Copilot in VS Code | `.github/copilot-instructions.md` and canonical `.agents/skills` | `.vscode/mcp.json` with `servers` |
-
-These are different configuration formats. GitHub cloud coding agents, browser-only clients and hosted GPU/server deployment are not covered by these local registration examples.
-
-For Codex, merge the table in [codex-config.example.toml](clients/codex-config.example.toml), replacing paths. Or register locally:
-
-```bash
-codex mcp add aurora_air_pollution -- /absolute/path/aurora/.venv-workflow/bin/python -m aurora_workflow.mcp_server --config /absolute/path/aurora-local.json
-codex mcp list
-```
-
-Restart the session when required by the client and inspect the server/tool list. The current official [Codex MCP guide](https://developers.openai.com/codex/mcp/) documents local stdio registration; the [skill guide](https://developers.openai.com/codex/skills/) documents `.agents/skills` discovery.
-
-For Claude Code without the plugin, use local scope to keep machine-specific paths out of tracked project files. Do not use this additional server registration when the plugin's bundled MCP server is enabled:
-
-```bash
-claude mcp add --transport stdio --scope local aurora_air_pollution -- /absolute/path/aurora/.venv-workflow/bin/python -m aurora_workflow.mcp_server --config /absolute/path/aurora-local.json
+claude mcp add --transport stdio --scope local aurora_air_pollution -- /absolute/path/aurora/bin/aurora-mcp
 claude mcp get aurora_air_pollution
 ```
 
-The [Claude JSON example](clients/claude-mcp.example.json) shows the project `.mcp.json` shape if desired; review trust prompts rather than committing an auto-approval setting. The `.claude/skills` adapter is a repository symlink, whose target is tested. If a checkout does not preserve symlinks, read the canonical skill through CLAUDE.md; restore the link for slash-command discovery. See official [MCP](https://code.claude.com/docs/en/mcp) and [skills](https://code.claude.com/docs/en/skills) documentation.
+Do not add it while the plugin's server is enabled. The bundled registration lives only in the plugin manifest; there is deliberately no root `.mcp.json` that could also start a project-scope copy. [Official MCP guide](https://code.claude.com/docs/en/mcp), [plugin reference](https://code.claude.com/docs/en/plugins-reference).
 
-For GitHub Copilot in VS Code, merge [vscode-mcp.example.json](clients/vscode-mcp.example.json) into `.vscode/mcp.json` locally, replace paths, then use **MCP: List Servers** to start/review the server and inspect tools. Follow official [VS Code MCP](https://code.visualstudio.com/docs/agent-customization/mcp-servers) and [GitHub Copilot skills](https://docs.github.com/en/copilot/how-tos/copilot-on-github/customize-copilot/customize-cloud-agent/add-skills) documentation. Avoid committing workstation-specific `.vscode/mcp.json` paths or secrets.
+### OpenAI Codex CLI and IDE extension
+
+Open/work in the branch checkout. Codex discovers the canonical `.agents/skills/msresearch-aurora-air-pollution/SKILL.md`; `AGENTS.md` provides project routing. **Terminal:**
+
+```bash
+codex mcp add aurora_air_pollution -- /absolute/path/aurora/bin/aurora-mcp
+codex mcp list
+```
+
+Alternatively merge [codex-config.example.toml](clients/codex-config.example.toml) into **`~/.codex/config.toml`**, substituting your launcher path. It uses `mcp_servers` TOML. The immediate setup connection avoids a long startup timeout. Restart the Codex session, check `/mcp`, invoke `$msresearch-aurora-air-pollution`, and call inspection tools. CLI and IDE share MCP configuration; this does not configure a hosted cloud worker. [Official skills](https://developers.openai.com/codex/skills/) and [MCP](https://developers.openai.com/codex/mcp/) documentation.
+
+### GitHub Copilot in VS Code agent mode
+
+Open the branch checkout and use agent mode. VS Code supports `.agents/skills/` as a repository skill location, so no extra symlink or second copy is required. `.github/copilot-instructions.md` links the same canonical source. Check the agent's customizations/skills view for `msresearch-aurora-air-pollution`; skill availability does not guarantee invocation on every prompt.
+
+Copy [vscode-mcp.example.json](clients/vscode-mcp.example.json) into your local **`.vscode/mcp.json`**. This is a VS Code `servers` object with `type: stdio` and `${workspaceFolder}/bin/aurora-mcp`, not Claude's `mcpServers` JSON. With a multi-root workspace, bind it to the Aurora root or replace the variable with an absolute launcher path. Use **MCP: List Servers** to start/trust the entry, inspect its tools and call `setup_status` and `inspect_environment`. Keep local paths/secrets out of commits. [Official skills](https://code.visualstudio.com/docs/agent-customization/agent-skills) and [MCP schema/setup](https://code.visualstudio.com/docs/agent-customization/mcp-servers).
+
+This setup is specifically Copilot **in VS Code**. Copilot CLI uses its own MCP configuration; GitHub's cloud coding agent runs in a separate provisioned environment with its own network, credentials and compute. Neither inherits `.vscode/mcp.json` or your local GPU. Those surfaces are not validated here.
+
+The [real VS Code smoke test](../tests/vscode/README.md) passed in VS Code 1.142.0: the application discovered the canonical skill and this workspace server, refreshed from setup tools to all 26 tools, and invoked inspection and knowledge tools through its native tool API. Claude Code extension activation and bundled plugin inventory also passed. Authenticated Copilot/Claude/Codex chat sessions remain separate, untested checks.
+
+### Claude Desktop and other local MCP hosts
+
+Clone the branch, then merge [claude-mcp.example.json](clients/claude-mcp.example.json) into the host's **local stdio configuration** with your absolute launcher path. For Claude Desktop this is the `mcpServers` section of `claude_desktop_config.json` (macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`; Windows Desktop alone does not make this Linux/macOS launcher a native Windows worker). Restart the application and inspect tools. [Official local MCP host guide](https://modelcontextprotocol.io/docs/develop/connect-local-servers).
+
+Desktop does not install Claude Code marketplace skills automatically. Give the agent the canonical skill and `knowledge/index.md`, or explicitly ask it to read MCP resources `aurora://instructions`, `aurora://workflow-routing`, `aurora://evidence`, then use `knowledge_read`/`knowledge_search`. These resources read the exact canonical files; they are not divergent workflow copies. If a host cannot consume resources, paste the canonical instructions into its instruction context. Give it the same first prompt from the README and verify actual tool calls.
+
+### ChatGPT and other GPT hosts
+
+“GPT-based” describes a model, not an execution interface. **Codex CLI/IDE with local stdio** is the documented OpenAI route here. A custom local agent runtime can spawn the same stdio launcher and supply the canonical instructions/OKF resources, but that integration must be tested separately.
+
+Browser ChatGPT cannot launch this repository's stdio command on a colleague's machine. A ChatGPT MCP app/plugin requires a reachable remote MCP interface (for example Streamable HTTP over HTTPS) and a deployment/authentication/access arrangement; this repository currently ships **stdio only**, no remote endpoint, connector manifest or tunnel integration. The operator would need to supply and secure that bridge and retain the terminal approval mechanism on the execution host. Installing an OKF bundle or pasting a branch URL does not provide local tool execution. See the [official ChatGPT MCP quickstart](https://developers.openai.com/plugins/build/app-quickstart) for its separate interface requirements. No browser ChatGPT interoperability test is claimed.
 
 ## Inspect, plan, authorize, execute
 
@@ -92,13 +86,16 @@ Use one of these four canonical refinement selections, or `none`:
 
 `flow_matching_unet` is the historical adapter, not an alias for the unified convolutional UNet. The common modes are `replay`, `resume`, `warm-start`, `reproduce`, `evaluate`; exact checkpoint requirements differ. Replay never silently creates a newly trained model. A requested `product: ensemble` needs at least two members and a compatible stochastic configuration; canonical point inference remains deterministic and spatial-only. For historical combined checkpoints, choose `no2-historical-forecast-forced-v1` or `o3-historical-forecast-forced-v1` only when their recorded exogenous-input contract matches. The historical-named variants reuse source forcing dynamics with specified-cycle CAMS forecasts, excluding unavailable future analyses. They are a versioned approximation to the old analysis-refresh behavior: checkpoint-head replay may be compatible while the baseline is shifted. Neither these variants nor the canonical autonomous recipes establish exact historical numerical reproduction. Identify flow versus diffusion from checkpoint/configuration metadata, not the word “Transformer”.
 
-For an agent, use MCP. The following human CLI examples show the shared backend and allow a local operator to inspect a plan without executing it:
+For an agent, use MCP. The following **human terminal** examples show the shared backend and inspect plans without executing them. Set these paths from `setup_status` (or use your manual checkout/environment); direct module commands need the source on their import path:
 
 ```bash
-.venv-workflow/bin/python -m aurora_workflow --config /absolute/path/aurora-local.json plan --recipe cpu-smoke-v1 --head flow_matching_conv_unet --mode reproduce --case-id smoke-flow-unet
-.venv-workflow/bin/python -m aurora_workflow --config /absolute/path/aurora-local.json plan --recipe cpu-smoke-v1 --head flow_matching_transformer --mode reproduce --case-id smoke-flow-transformer
-.venv-workflow/bin/python -m aurora_workflow --config /absolute/path/aurora-local.json plan --recipe cpu-smoke-v1 --head diffusion_unet --mode reproduce --case-id smoke-diffusion-unet
-.venv-workflow/bin/python -m aurora_workflow --config /absolute/path/aurora-local.json plan --recipe cpu-smoke-v1 --head diffusion_transformer --mode reproduce --case-id smoke-diffusion-transformer
+export PYTHONPATH="/absolute/path/to/plugin-or-checkout"
+WORKFLOW_PYTHON="/absolute/path/to/selected-environment/bin/python"
+WORKFLOW_CONFIG="/absolute/path/to/workflow.json"
+"$WORKFLOW_PYTHON" -m aurora_workflow --config "$WORKFLOW_CONFIG" plan --recipe cpu-smoke-v1 --head flow_matching_conv_unet --mode reproduce --case-id smoke-flow-unet
+"$WORKFLOW_PYTHON" -m aurora_workflow --config "$WORKFLOW_CONFIG" plan --recipe cpu-smoke-v1 --head flow_matching_transformer --mode reproduce --case-id smoke-flow-transformer
+"$WORKFLOW_PYTHON" -m aurora_workflow --config "$WORKFLOW_CONFIG" plan --recipe cpu-smoke-v1 --head diffusion_unet --mode reproduce --case-id smoke-diffusion-unet
+"$WORKFLOW_PYTHON" -m aurora_workflow --config "$WORKFLOW_CONFIG" plan --recipe cpu-smoke-v1 --head diffusion_transformer --mode reproduce --case-id smoke-diffusion-transformer
 ```
 
 For a real NO2 plan, replace the recipe with `no2-us-west-v1`; for O3 use `o3-global-v1`. Bound time, disk, download bytes, requests, steps, epochs, cases, memory, device and ensemble members in a local JSON request passed with `plan --request /absolute/path/request.json`. This is a typed `PlanRequest`, for example:
@@ -131,7 +128,7 @@ Paths must be under configured permitted roots; the trained checkpoint must carr
 The operator reviews the returned plan hash, resource limits, costs/unknowns, input fingerprints and stage list, then approves that plan in their own interactive terminal:
 
 ```bash
-.venv-workflow/bin/python -m aurora_workflow --config /absolute/path/aurora-local.json approve PLAN_ID
+/absolute/path/aurora/bin/aurora-mcp --approve PLAN_ID
 ```
 
 No MCP tool approves a plan, and a model-authored `approved=true` is not authorization. Do not have the agent automate the terminal confirmation or call internal approval methods. Approval uses local HMAC state and is tied to the effective plan and inputs; this protects the MCP capability boundary, not against the machine owner or an agent separately granted unrestricted local shell access. Configure client permissions accordingly.

@@ -34,10 +34,22 @@ def _declared_tools() -> set[str]:
     }
 
 
+def _check_installed_skill_links(root):
+    """References must remain inside a copied plugin, without the source checkout."""
+    for skill in [*root.glob("skills/*/SKILL.md"),
+                  root / ".agents/skills/msresearch-aurora-air-pollution/SKILL.md"]:
+        for target in re.findall(r"\[[^]]+\]\(([^)]+)\)", skill.read_text()):
+            if target.startswith(("http://", "https://", "#")):
+                continue
+            resolved = (skill.parent / target.split("#", 1)[0]).resolve()
+            assert resolved.is_relative_to(root.resolve()), (skill, target)
+            assert resolved.is_file(), (skill, target)
+
+
 def test_manifests_and_plugin_mcp_registration_are_consistent():
     plugin = json.loads((ROOT / ".claude-plugin/plugin.json").read_text())
     marketplace = json.loads((ROOT / ".claude-plugin/marketplace.json").read_text())
-    mcp = json.loads((ROOT / ".mcp.json").read_text())
+    mcp = plugin
     entry = marketplace["plugins"][0]
 
     assert plugin["name"] == "aurora-air-pollution"
@@ -48,6 +60,7 @@ def test_manifests_and_plugin_mcp_registration_are_consistent():
     assert list(mcp["mcpServers"]) == ["aurora-air-pollution"]
     server = mcp["mcpServers"]["aurora-air-pollution"]
     assert server == {"command": "${CLAUDE_PLUGIN_ROOT}/bin/aurora-mcp", "args": []}
+    assert not (ROOT / ".mcp.json").exists()  # No duplicate project-scope server.
     assert stat.S_IMODE((ROOT / "bin/aurora-mcp").stat().st_mode) & stat.S_IXUSR
 
 
@@ -116,13 +129,17 @@ def test_source_fingerprint_remains_available_without_git_metadata(monkeypatch):
     assert record["imported_workflow_path"] == str(ROOT)
 
 
-def test_launcher_actionable_setup_failure_from_outside_checkout(tmp_path):
+def test_launcher_actionable_missing_python_from_outside_checkout(tmp_path):
+    fake_path = tmp_path / "bin"
+    fake_path.mkdir()
+    (fake_path / "dirname").symlink_to(shutil.which("dirname"))
     env = {**os.environ, "HOME": str(tmp_path), "XDG_CONFIG_HOME": str(tmp_path / "config"),
-           "XDG_CACHE_HOME": str(tmp_path / "cache"), "AURORA_WORKFLOW_VENV": str(tmp_path / "missing-venv")}
+           "XDG_CACHE_HOME": str(tmp_path / "cache"), "PATH": str(fake_path),
+           "AURORA_PYTHON": "", "AURORA_WORKFLOW_VENV": str(tmp_path / "missing-venv")}
     result = subprocess.run([str(ROOT / "bin/aurora-mcp")], cwd=tmp_path, env=env,
                             capture_output=True, text=True, timeout=10)
     assert result.returncode == 2
-    assert "bin/aurora-mcp --install" in result.stderr
+    assert "Python 3.12" in result.stderr and "client's PATH" in result.stderr
     assert result.stdout == ""
 
 
@@ -191,9 +208,9 @@ def test_plugin_launcher_starts_stdio_server_outside_checkout(tmp_path):
 
     installed_root = tmp_path / "installed-plugin"
     copy_items = (
-        ".agents", ".claude-plugin", ".mcp.json", "aurora", "aurora_workflow",
+        ".agents", ".claude-plugin", "aurora", "aurora_workflow",
         "bin", "docs", "finetune", "knowledge", "provenance", "recipes",
-        "requirements", "skills",
+        "requirements", "skills", "scripts",
     )
     ignore = shutil.ignore_patterns(".git", "__pycache__", "*.pyc", "*.ipynb", "*.ckpt",
                                    "*.pt", "*.pth", "*.pickle", "*.npz", "*.nc")
@@ -205,6 +222,7 @@ def test_plugin_launcher_starts_stdio_server_outside_checkout(tmp_path):
             shutil.copytree(source, destination, ignore=ignore)
         else:
             shutil.copy2(source, destination)
+    _check_installed_skill_links(installed_root)
 
     config = tmp_path / "workflow.json"
     config.write_text(json.dumps({
@@ -226,8 +244,22 @@ def test_plugin_launcher_starts_stdio_server_outside_checkout(tmp_path):
         async with stdio_client(params) as (read, write):
             async with ClientSession(read, write) as client:
                 await client.initialize()
+                for _ in range(300):
+                    status = (await client.call_tool("setup_status", {})).structuredContent
+                    assert status["state"] != "failed", status
+                    if status["state"] == "ready":
+                        break
+                    await asyncio.sleep(.1)
+                assert status["state"] == "ready", status
                 tools = await client.list_tools()
                 assert "inspect_environment" in {tool.name for tool in tools.tools}
+                assert {"setup_status", "setup_retry"} <= {tool.name for tool in tools.tools}
+                resources = await client.list_resources()
+                assert "aurora://instructions" in {str(r.uri) for r in resources.resources}
+                instructions = await client.read_resource("aurora://instructions")
+                assert "feedback_to_rollout=false" in instructions.contents[0].text
+                assert (await client.read_resource("aurora://workflow-routing")).contents[0].text
+                assert (await client.read_resource("aurora://evidence")).contents[0].text
                 environment = await client.call_tool("inspect_environment", {})
                 assert environment.structuredContent["fork_import_verified"]
                 result = await client.call_tool("list_runs", {})
@@ -242,3 +274,54 @@ def test_plugin_launcher_starts_stdio_server_outside_checkout(tmp_path):
                 assert len(plan.structuredContent["source"]["code_hash"]) == 64
 
     asyncio.run(check())
+
+
+def test_failed_first_setup_stays_connected_and_can_retry_configuration(tmp_path):
+    """No package installs: compatible existing environment, initially invalid JSON."""
+    import asyncio
+    from mcp import ClientSession, StdioServerParameters
+    from mcp.client.stdio import stdio_client
+
+    config_home = tmp_path / "config"
+    (config_home / "aurora").mkdir(parents=True)
+    options = config_home / "aurora/launcher.json"
+    options.write_text("{")
+    env = {**os.environ, "HOME": str(tmp_path), "XDG_CONFIG_HOME": str(config_home),
+           "XDG_CACHE_HOME": str(tmp_path / "cache"),
+           "AURORA_WORKFLOW_VENV": str(Path(os.sys.executable).absolute().parent.parent)}
+    env.pop("AURORA_WORKFLOW_CONFIG", None)
+
+    async def poll(client, expected):
+        for _ in range(200):
+            status = (await client.call_tool("setup_status", {})).structuredContent
+            if status["state"] == expected:
+                return status
+            await asyncio.sleep(.05)
+        pytest.fail(str(status))
+
+    async def exercise():
+        async with stdio_client(StdioServerParameters(command=str(ROOT / "bin/aurora-mcp"), cwd=str(tmp_path), env=env)) as (read, write):
+            async with ClientSession(read, write) as client:
+                await client.initialize()
+                await poll(client, "failed")
+                assert {t.name for t in (await client.list_tools()).tools} == {"setup_status", "setup_retry"}
+                options.write_text(json.dumps({"workspace": str(tmp_path / "chosen workspace")}))
+                await client.call_tool("setup_retry", {})
+                status = await poll(client, "ready")
+                inspected = (await client.call_tool("inspect_environment", {})).structuredContent
+                assert inspected["roots"]["data_root"]["path"] == str(tmp_path / "chosen workspace/data")
+                assert json.loads(Path(status["config"]).read_text())["assets"] == {}
+                assert (await client.call_tool("knowledge_validate", {})).structuredContent["ok"]
+    asyncio.run(exercise())
+
+
+def test_setup_preserves_invalid_existing_workflow_config(tmp_path):
+    config = tmp_path / "invalid.json"
+    original = '{"data_root":"relative"}'
+    config.write_text(original)
+    env = {**os.environ, "AURORA_WORKFLOW_CONFIG": str(config),
+           "AURORA_WORKFLOW_VENV": str(Path(os.sys.executable).absolute().parent.parent)}
+    result = subprocess.run([str(ROOT / "bin/aurora-mcp"), "--check"], cwd=tmp_path,
+                            env=env, capture_output=True, text=True, timeout=20)
+    assert result.returncode == 2 and "Invalid workflow configuration" in result.stderr
+    assert result.stdout == "" and config.read_text() == original

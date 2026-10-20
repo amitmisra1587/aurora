@@ -25,6 +25,8 @@ def lock_digest(repo: Path, mode: str) -> str:
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--venv", required=True)
+    parser.add_argument("--no-project", action="store_true",
+                        help="Use the launcher's PYTHONPATH instead of an editable install (plugin caches)")
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument("--data", action="store_true",
                        help="Install pinned CAMS acquisition/preparation dependencies without PyTorch")
@@ -70,8 +72,9 @@ def main():
             if existing.get("state") != "installing":
                 raise SystemExit("Managed environment state is invalid; choose a new path.")
     else:
-        venv.EnvBuilder(with_pip=True).create(target)
+        target.mkdir(parents=True)
         marker.write_text(json.dumps({**expected, "state": "installing"}, indent=2, sort_keys=True) + "\n")
+        venv.EnvBuilder(with_pip=True).create(target)
     python = str(python_path)
 
     def run(*cmd):
@@ -82,7 +85,8 @@ def main():
     requirements = {"light": "workflow-light.txt", "data": "workflow-data.txt",
                     "science": "workflow-cpu.txt"}[mode]
     run("install", "-r", str(repo / "requirements" / requirements))
-    run("install", "--no-deps", "-e", str(repo))
+    if not args.no_project:
+        run("install", "--no-deps", "-e", str(repo))
     marker.write_text(json.dumps({**expected, "state": "ready"}, indent=2, sort_keys=True) + "\n")
     print(f"Ready: {python} -m aurora_workflow --help")
 

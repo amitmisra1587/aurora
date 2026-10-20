@@ -1,133 +1,129 @@
 # Claude Code plugin runbook
 
-This plugin packages the existing `aurora_workflow` backend and the canonical
-air-pollution instructions. It does not replace the Aurora science code. The
-branch already contains CAMS planning/acquisition, full-backbone preparation,
-the frozen `AuroraAirPollution` rollout, four residual heads, durable approved
-jobs, evaluation and provenance. The plugin adds Claude Code manifests,
-focused skills, a launcher and container packaging.
+The [README](../README.md) is the short first-use route. This runbook covers path choices, larger environments, manual recovery and containers. One canonical [scientific skill](../.agents/skills/msresearch-aurora-air-pollution/SKILL.md), the [OKF bundle](../knowledge/index.md) and the existing `aurora_workflow` backend serve every client.
 
-## Recommended install: branch clone, configure, install
+## Marketplace installation
 
-Use Python 3.12–3.14 and Git. Linux is the supported worker platform. This
-branch is not the repository default branch, so always select it explicitly.
-From a shell:
+Prerequisites: Git, Claude Code with plugin support/authentication, Python 3.12–3.14 with `venv` and `pip`, network access to the pinned packages and writable external storage. Python must be on the PATH inherited by the MCP client; an IDE started from a GUI may have a different PATH from your terminal.
+
+**Terminal:**
 
 ```bash
-git clone --branch agent_skills_to_finetune_aurora --single-branch \
-  https://github.com/midatm1234/aurora.git aurora-plugin
-cd aurora-plugin
-
-WORKFLOW_VENV="${XDG_CACHE_HOME:-$HOME/.cache}/aurora-air-pollution/venv"
-WORKFLOW_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/aurora/workflow.json"
-WORKSPACE="$HOME/aurora-air-pollution-work"
-
-python3.12 scripts/bootstrap_workflow.py --venv "$WORKFLOW_VENV" --data
-"$WORKFLOW_VENV/bin/python" -m aurora_workflow --config "$WORKFLOW_CONFIG" \
-  configure --workspace "$WORKSPACE"
-AURORA_WORKFLOW_VENV="$WORKFLOW_VENV" AURORA_WORKFLOW_CONFIG="$WORKFLOW_CONFIG" \
-  bin/aurora-mcp --check
-
-claude plugin validate .
-claude plugin marketplace add .
+claude plugin marketplace add "midatm1234/aurora#agent_skills_to_finetune_aurora"
 claude plugin install aurora-air-pollution@aurora
 claude plugin list
 ```
 
-`--data` installs pinned MCP, CAMS and preparation dependencies without
-installing PyTorch. The environment and configuration live outside the plugin
-checkout/cache. Bootstrap is repeatable for its own matching, marked
-environment; it refuses to mutate an unrelated or differently pinned
-environment. The configure command refuses to overwrite an existing config.
-`--check` runs the backend doctor without downloading assets or loading the
-model.
+Restart the Claude session (including the VS Code extension session), then ask:
 
-Claude Code's current official marketplace instructions support a branch ref
-on the GitHub marketplace source. After setting up the external environment
-from the clone above, the equivalent remote-source commands are:
+> Set up this machine for the Aurora air-pollution workflow. Check the environment, available compute, existing datasets, checkpoints, and previous outputs. Prepare the lightweight setup and explain which workflow steps this machine can run.
 
-```bash
-claude plugin marketplace add midatm1234/aurora#agent_skills_to_finetune_aurora
-claude plugin install aurora-air-pollution@aurora
+**Claude session:** inspect `/plugin`, `/mcp`, and `/aurora-air-pollution:aurora-setup`. The other skills are `aurora-cams-data`, `aurora-finetune`, `aurora-evaluate` and `aurora-reproduce`, under the same namespace. The plugin manifest's `mcpServers` field launches `${CLAUDE_PLUGIN_ROOT}/bin/aurora-mcp`. There is no root `.mcp.json` to create a duplicate project-scope registration when opening the checkout. Do not register a second `aurora_air_pollution` server when the plugin is active.
+
+Marketplace name: `aurora`; plugin name: `aurora-air-pollution`; plugin version: `0.2.0`. The marketplace is fetched from the selected branch and the plugin entry's relative `./` source copies that same checkout, including hidden canonical instructions and knowledge. There is no independent fetch that could fall back to the default branch. See [official branch selection](https://code.claude.com/docs/en/plugins/host-marketplace) and [relative source semantics](https://code.claude.com/docs/en/plugins/marketplace-reference#relative-path-plugin-source). A local marketplace installation below uses the local source, allowing unpublished edits to be tested.
+
+## First connection
+
+The dependency-free supervisor answers MCP initialization immediately and exposes `setup_status` / `setup_retry`. In a background thread it:
+
+1. Reads optional external launcher settings, selects/reuses a compatible environment, and takes an installation lock.
+2. Installs only `requirements/workflow-light.txt` into an external environment if needed. It uses the packaged code directly through `PYTHONPATH`, so it does not need Git metadata, an editable package build or a writable plugin cache.
+3. Creates the default workflow configuration only if absent and validates existing settings without overwriting them.
+4. Starts the shared official-SDK stdio backend and announces a changed tool list. The two setup tools remain available alongside the 24 workflow tools.
+
+Ask for `setup_status`, then `inspect_environment`, `inspect_assets`, `list_runs`, and `knowledge_validate`. Success: setup `ready`, `fork_import_verified: true`, your configured roots, empty assets/jobs on a fresh machine, and valid knowledge. Missing NumPy/PyTorch/data packages are normal in this minimal profile. If the host caches tool lists, restart the MCP server/session after setup completes.
+
+All protocol traffic uses stdout; setup diagnostics use stderr, and package installation details go to a private external log whose path is reported by `setup_status`. Setup does not download scientific assets, datasets or credentials and does not approve or run a scientific plan. Setup success does not establish GPU readiness or forecast performance.
+
+## Paths and environments
+
+Defaults:
+
+- Settings: `${XDG_CONFIG_HOME:-~/.config}/aurora/launcher.json` (optional).
+- Workflow configuration: `${XDG_CONFIG_HOME:-~/.config}/aurora/workflow.json`.
+- Minimal environment: `${XDG_CACHE_HOME:-~/.cache}/aurora-air-pollution/venv-<Python-major.minor>-<light-lock-hash>`.
+- Workspace: `~/aurora-air-pollution-work`, with separate `data`, `cache`, `runs`, `state` roots.
+- Setup log and lock: next to the selected environment, named `<venv-name>.setup.log` and `.setup.lock`.
+
+To change paths, ask the setup agent to create/edit **this local configuration file**, before first connection if desired. Use your own absolute paths or `~/...`; no shell expansion occurs inside JSON except leading `~`:
+
+```json
+{
+  "workspace": "~/aurora-air-pollution-work",
+  "venv": "~/aurora-environments/mcp",
+  "config": "~/.config/aurora/workflow.json"
+}
 ```
 
-The `#branch` form is documented at
-[Host and maintain a marketplace](https://code.claude.com/docs/en/plugins/host-marketplace#pin-a-branch-or-tag).
-The clone commands above are the reliable fallback and also allow local
-validation. No Claude Code binary was available in this implementation
-environment, so client-side validation/session startup is not claimed.
+Every key is optional. A custom `workspace` applies only when creating a missing workflow config. Existing `workflow.json` roots remain authoritative; inspect them before moving data. Set `read_roots` and checksum/architecture-bearing `assets` entries there to reuse trusted datasets, checkpoints and outputs on shared disks. Do not place mutable paths inside the installed plugin. No config or environment is overwritten to make it appear compatible.
 
-After installation, start a new Claude Code session or reload plugins. Confirm
-the component list with `claude plugin details aurora-air-pollution`; skills
-appear as `/aurora-air-pollution:aurora-setup`,
-`/aurora-air-pollution:aurora-cams-data`,
-`/aurora-air-pollution:aurora-finetune`,
-`/aurora-air-pollution:aurora-evaluate`, and
-`/aurora-air-pollution:aurora-reproduce`. The bundled MCP server starts from
-the plugin's `${CLAUDE_PLUGIN_ROOT}/bin/aurora-mcp` path, not from a hard-coded
-checkout path. It reads the default external config and environment documented
-below. The server writes only MCP protocol messages to stdout and logs to
-stderr.
+Advanced environment overrides take precedence over launcher.json: `AURORA_WORKSPACE`, `AURORA_WORKFLOW_VENV`, `AURORA_WORKFLOW_CONFIG`; `AURORA_PYTHON` selects the bootstrap Python. Put overrides in the launching process or the host's MCP `env` object. Prefer launcher.json for persistent path choices. XDG variables change the default config/cache base directories.
 
-## Native setup, assets and secure ADS access
+A compatible existing environment must have Python 3.12–3.14 and the exact minimal package pins; it may also contain scientific packages. The legacy `~/.cache/aurora-air-pollution/venv` is reused if compatible. Explicit incompatible environments are preserved: choose a new path or deliberately prepare a compatible environment yourself. Default lock changes select a new path on update, leaving older environments and runs intact. Concurrent starts serialize installation; interrupted managed installations are retried.
 
-The default locations are:
+### Larger dependencies, only when requested
 
-- Python environment: `${XDG_CACHE_HOME:-~/.cache}/aurora-air-pollution/venv`
-- Local settings: `${XDG_CONFIG_HOME:-~/.config}/aurora/workflow.json`
-- Data, cache, outputs and durable job/approval state: separate subdirectories
-  below the workspace passed to `configure`
-- ADS credentials: `~/.cdsapirc`, or the path in `CDSAPI_RC`
+Resolve `PLUGIN_ROOT` below to the installed skill's `../../` directory, or to your manual checkout. The setup agent already has that skill path; users need not search Claude's cache. These commands run in a **terminal** or through an agent acting on a request for that capability:
 
-Keep credentials, configs, caches, data, checkpoints and job outputs outside
-the versioned plugin and plugin cache. Use a dedicated workspace; point
-`read_roots`/asset paths at existing trusted artifacts when reusing them.
-Never paste a token into chat, a recipe, a log or a report.
+```bash
+python3.12 "$PLUGIN_ROOT/scripts/bootstrap_workflow.py" \
+  --venv "$HOME/aurora-environments/data" --data --no-project
+# Optional CPU fixture / analysis environment; includes PyTorch, no CUDA:
+python3.12 "$PLUGIN_ROOT/scripts/bootstrap_workflow.py" \
+  --venv "$HOME/aurora-environments/science-cpu" --science --no-project
+```
 
-Create an ADS account, generate a personal access token in the ADS profile, and
-manually accept the CAMS dataset terms in the browser before requesting data.
-Put the token only into your local file, using the format given by the current
-[ADS API setup page](https://ads.atmosphere.copernicus.eu/how-to-api):
+Use the supported Python executable available on your machine (`python3.12`, `python3.13` or `python3.14`). Each bootstrap profile has its own marker; create a separate environment when changing profiles instead of mutating one used by active jobs. Set `venv` in launcher.json to the chosen environment and reconnect. The launcher keeps imports tied to the current installed source even when a dependency environment is reused.
+
+For CUDA training/inference, supply a compatible Linux CUDA-enabled scientific environment with the light/data requirements and the existing `finetune` dependencies. The CPU bootstrap does not install CUDA. Select it with launcher.json; call `inspect_environment(check_torch=true)` and check the actual device/memory and recipe/checkpoint contracts. No GPU minimum or automatic CUDA installation is promised.
+
+### ADS access
+
+For a requested CAMS acquisition, create your own ADS account and manually accept the selected dataset terms. Follow the current [ADS API setup](https://ads.atmosphere.copernicus.eu/how-to-api). Enter the token locally in `~/.cdsapirc` or `CDSAPI_RC`, never in chat, recipes or reports:
 
 ```yaml
 url: https://ads.atmosphere.copernicus.eu/api
 key: <enter-your-token-locally>
 ```
 
+**Terminal:** `chmod 600 "${CDSAPI_RC:-$HOME/.cdsapirc}"`. Inspection reports presence only; it does not establish accepted terms or product/date access. Public model/static files are retrieved only by a bounded approved plan. Unpublished refinement checkpoints must be supplied as trusted compatible artifacts by the operator.
+
+## Manual fallback
+
+Use this when you prefer a checkout, a client cannot install plugins, or initial MCP connectivity fails. **Terminal:**
+
 ```bash
-chmod 600 "${CDSAPI_RC:-$HOME/.cdsapirc}"
+git clone --branch agent_skills_to_finetune_aurora --single-branch \
+  https://github.com/midatm1234/aurora.git aurora-plugin
+cd aurora-plugin
 bin/aurora-mcp --check
+claude plugin validate .
+claude plugin marketplace add .
+claude plugin install aurora-air-pollution@aurora
 ```
 
-The doctor reports presence only. It does not prove that ADS permissions,
-accepted terms or product availability are valid. An acquisition fails clearly
-when no local credentials are present; API-side terms/date/variable errors are
-not converted into success. The `cdsapi` client remains supported by the ADS
-setup guidance; this branch pins its compatible client and the verified
-dataset form/request fields in the shared backend.
+Use either the local marketplace or the remote marketplace for `aurora`; inspect an existing registration before replacing it. `--check` performs repeatable minimal setup and prints doctor JSON; `--install` prepares setup and prints paths; neither starts a scientific job. Plain `bin/aurora-mcp` serves stdio. Both work from an unrelated working directory. To select one custom workflow config directly, use `bin/aurora-mcp --config /absolute/path/workflow.json`.
 
-For only MCP/setup/recipe inspection, a separate minimal environment is
-available:
+If an existing manually managed environment is desired, use `scripts/bootstrap_workflow.py --venv /external/path --no-project`, then choose it in launcher.json. This works without a package build; if using `python -m aurora_workflow` directly outside the checkout, set `PYTHONPATH` to that checkout. Prefer the launcher, which supplies the correct import path automatically.
+
+| Symptom | Recovery |
+| --- | --- |
+| MCP cannot start, Python error in client logs | Install Python 3.12–3.14 with venv/pip (on Debian/Ubuntu the matching `python3.x-venv` package may be needed). Make it visible to the client or set `AURORA_PYTHON`; restart the client. |
+| Setup `installing` | Poll `setup_status`; inspect the reported private pip log locally. |
+| Setup `failed`, dependency installation | Restore package-index/network access or venv/pip support. Call `setup_retry` or rerun `--check`. |
+| Incompatible existing environment | Preserve it; choose a new external `venv` path, then retry. |
+| Invalid launcher/workflow config | Correct JSON and supported keys/absolute dedicated roots; keep state separate. Retry; existing settings are retained. |
+| Ready but inspection tools missing | Reconnect/restart the MCP server to refresh the client's tool list. |
+| Two Aurora servers | Disable the manual registration when using the plugin. |
+| Old plugin after update | Update marketplace and plugin, verify installed version, restart the session; see below. |
+
+For scientific approval, the agent reports the resolved launcher path. The **human runs in their own interactive terminal**:
 
 ```bash
-python3.12 scripts/bootstrap_workflow.py --venv "$HOME/.cache/aurora-inspect/venv"
+"$PLUGIN_ROOT/bin/aurora-mcp" --approve PLAN_ID
 ```
 
-For the CPU fixture suite, use a different path and install the CPU science
-stack. This does not install CUDA:
-
-```bash
-python3.12 scripts/bootstrap_workflow.py --venv "$HOME/.cache/aurora-science-cpu/venv" --science
-"$HOME/.cache/aurora-science-cpu/venv/bin/python" -m pytest \
-  --confcutdir=tests/workflow tests/workflow
-```
-
-For real GPU training/inference, use a compatible CUDA-enabled PyTorch
-environment and check `doctor --check-torch`; do not replace the fork with a
-PyPI/weather starter package. Public pinned backbone weights and static assets
-are retrieved only through a bounded approved plan. Historical trained
-refinement checkpoints are not included; replay requires a trusted compatible
-checkpoint supplied by the operator.
+This uses the same environment/config as MCP. Never ask the agent to automate approval. For custom per-registration environment overrides, apply the same overrides to this human command. The plain CLI approval example in the portable guide is also available.
 
 ## One bounded first run
 
@@ -303,78 +299,30 @@ Installing Docker does not provide a GPU or CUDA training on non-NVIDIA
 hardware. No universal GPU-memory minimum is claimed; the doctor and reviewed
 plan report local resources and checkpoint/config compatibility.
 
-### Platform support and validation status
+## Platforms
 
-| Host | MCP/setup/data path | Real CUDA science | Status in this branch |
-|---|---|---|---|
-| Linux x86_64 CPU | Native or CPU Docker | No | CI covers CPU fixtures and MCP; Docker build unavailable in this environment |
-| Linux x86_64 NVIDIA | Native CUDA PyTorch or CUDA Docker target | Yes, with compatible driver/toolkit and memory | Code path exists; no GPU execution claimed here |
-| Windows | Use WSL2/Linux for workers | Only with a supported NVIDIA WSL2/container stack | Native Windows worker management is unsupported; WSL2 not tested here |
-| macOS Intel/ARM | Docker Desktop CPU may be useful for metadata/data tasks | No NVIDIA CUDA path | Native worker management and ARM scientific stack unverified; no training claim |
+| Machine | Intended capability | Actual validation |
+| --- | --- | --- |
+| Linux x86_64 CPU | Setup, metadata/OKF/recipe inspection; data/analysis after explicit dependencies | Clean setup, official SDK and CPU suite tested; see validation record |
+| Linux x86_64 NVIDIA | Real baseline/refinement with compatible CUDA and memory | Existing code path; no GPU execution in onboarding validation |
+| macOS Intel/ARM | Intended lightweight setup/inspection and compatible CPU analysis; remote Linux for CUDA | No Mac test; native worker lifecycle and scientific wheels unverified |
+| Windows | Use WSL2/Linux environment for launcher/workers | Native Windows unsupported; WSL2 untested |
+| Docker | CPU metadata/data or Linux CUDA image | Docker build/runtime not exercised here |
 
-No Docker daemon, compatible GPU, ADS account session or Claude Code client was
-available for this implementation run. Image builds, GPU execution and
-Claude/VS Code plugin loading are therefore explicitly unverified.
+Do not infer Mac CUDA support from Claude Code supporting macOS. To run on a remote machine, install and start the agent/MCP there (for example VS Code Remote SSH); local Mac stdio cannot access the remote filesystem or GPU automatically. [Other hosts](agent-workflow.md#client-setup).
 
-## Claude Desktop, Codex and Copilot
+## Updates and removal
 
-Claude Desktop is an MCP host, not a Claude Code plugin host. Clone the same
-branch, bootstrap/configure as above, then register the local stdio launcher
-using the Desktop MCP configuration format:
-
-```json
-{
-  "mcpServers": {
-    "aurora-air-pollution": {
-      "command": "/absolute/path/aurora-plugin/bin/aurora-mcp",
-      "args": [],
-      "env": {
-        "AURORA_WORKFLOW_VENV": "/absolute/path/to/aurora-air-pollution/venv",
-        "AURORA_WORKFLOW_CONFIG": "/absolute/path/to/aurora/workflow.json"
-      }
-    }
-  }
-}
-```
-
-Use absolute paths, restart Desktop, and inspect its MCP tool list. Desktop
-does not automatically discover Claude Code plugin skills; provide the
-canonical workflow prompt from `.agents/skills/msresearch-aurora-air-pollution/SKILL.md`
-or use Claude Code for skill discovery. For Docker, set the three Docker
-environment variables above instead of adding another registration.
-
-Codex and GitHub Copilot in VS Code retain their existing, client-specific
-skill/MCP configuration formats. Use the Codex and VS Code examples in
-`docs/agent-workflow.md`; do not copy Claude's `mcpServers` JSON into VS Code's
-`servers` configuration.
-
-When using this plugin in a checkout that also exposes the repository's
-canonical `.claude/skills` adapter, invoke either the focused plugin skill or
-the canonical repository skill as appropriate; do not add the separate
-`claude mcp add aurora_air_pollution ...` server while the plugin's
-`aurora-air-pollution` MCP server is enabled.
-
-## Update, removal and tests
-
-Update the branch-pinned marketplace/plugin with:
+**Terminal:**
 
 ```bash
 claude plugin marketplace update aurora
 claude plugin update aurora-air-pollution@aurora
+claude plugin list
 ```
 
-Remove the plugin with `claude plugin uninstall aurora-air-pollution@aurora`;
-remove the marketplace only after its plugins are uninstalled. Keep the
-external workspace, ADS config, assets and run state if you may need them
-later; uninstalling the plugin does not make those artifacts part of Git.
+Restart the session; inspect `/plugin` and `/mcp` again. This release bumps `0.1.0` to `0.2.0`; maintainers must bump `.claude-plugin/plugin.json` on subsequent published changes so cached installs refresh. The relative plugin source stays on the marketplace branch. A default dependency lock change gets its own external environment; an explicit environment path needs a compatible environment. Never update source/configuration beneath an active scientific job: input fingerprints and approvals must remain stable.
 
-Repeatable offline checks:
+`claude plugin uninstall aurora-air-pollution@aurora` removes the plugin registration. External settings, environments, credentials and workspace persist; deleting scientific data is a separate user action.
 
-```bash
-python -m pytest --confcutdir=tests/workflow tests/workflow
-```
-
-The test suite includes the actual MCP SDK stdio transport, skill/manifest/link
-checks and mocked CAMS contracts. Real ADS acquisition, container builds,
-Claude Code session/plugin discovery and GPU smoke runs are separately gated
-and must not be inferred from those passing checks.
+[Onboarding validation](onboarding-validation.md) records versions, performed checks and exact untested client-session steps. [Portable agent guide](agent-workflow.md) covers Codex, Copilot, Desktop and GPT hosts. [Scientific implementation report](workflow-implementation-report.md) retains the earlier scientific validation record.

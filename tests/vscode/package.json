@@ -1,0 +1,10 @@
+{
+  "name": "aurora-onboarding-test",
+  "publisher": "midatm1234",
+  "version": "0.0.1",
+  "private": true,
+  "engines": { "vscode": "^1.142.0" },
+  "main": "./extension.cjs",
+  "activationEvents": ["onStartupFinished"],
+  "enabledApiProposals": ["mcpServerDefinitions", "chatPromptFiles"]
+}

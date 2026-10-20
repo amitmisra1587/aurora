@@ -1,36 +1,106 @@
-## Reproduce the air-pollution refinement workflow with an agent
+# Aurora air-pollution workflow for your agent
 
-This branch adds a local MCP workflow around this fork's existing `AuroraAirPollution` implementation. Start with [the portable onboarding guide](docs/agent-workflow.md), [workflow inventory](docs/workflow-inventory.md), and [implementation/validation report](docs/workflow-implementation-report.md). Existing notebooks below remain available.
+Use this branch to prepare CAMS data, run the frozen `AuroraAirPollution` baseline, train or replay residual refinement, and evaluate matched forecasts on **your own compute**. It includes regional NO2/tcNO2 and global O3 recipes, durable jobs, artifact reuse and provenance. Existing scientific models and notebooks remain available.
 
-The workflow provides pinned assets, versioned NO2/O3 recipes, four unified residual heads plus the unchanged baseline, bounded human-approved jobs, physical-unit evaluation, and an attributed [OKF knowledge bundle](knowledge/index.md). The canonical recipes use autonomous frozen-backbone rollouts; separately named historical forecast-forced recipes document their exogenous inputs. Replay, resume, warm-start and retraining are distinct modes. Mamba remains optional in the existing research runners and is disabled in the canonical spatial recipes.
+Three components work together:
 
-## Claude Code plugin quick start
+- **Skills** guide the agent through setup, data acquisition, refinement, evaluation and reproduction.
+- **MCP server** supplies callable inspection and workflow tools on the machine where it runs.
+- **Open Knowledge Format (OKF) bundle** carries portable workflow knowledge, references and constraints in [knowledge/](knowledge/index.md). Knowledge, skill discovery and tool connectivity are separate capabilities.
 
-This installable plugin is on the non-default `agent_skills_to_finetune_aurora` branch. The recommended route is a branch clone so you can prepare and check the external data/MCP environment before Claude starts the server:
+## Prerequisites
+
+- Claude Code with plugin support and an authenticated account; Git.
+- Python **3.12–3.14**, including `venv` and `pip`, visible to the client, and internet access for the small pinned MCP dependencies.
+- A writable home directory (or your own external paths). No GPU, CAMS credentials, datasets or checkpoints are needed for first setup.
+
+Linux x86_64 is tested for onboarding and CPU workflow checks. A Mac can use the intended lightweight inspection/knowledge route and analyze compatible outputs after installing analysis dependencies; **macOS has not been tested here**. Real training/inference uses a Linux NVIDIA/CUDA environment with sufficient memory. Use a remote Linux machine for that work from a Mac; the MCP process and files must be on that machine. Native Windows workers are unsupported; WSL2/Linux is the intended, untested route. See [platform details](docs/claude-code-plugin.md#platforms).
+
+## Install in Claude Code
+
+**Run in a terminal:**
 
 ```bash
-git clone --branch agent_skills_to_finetune_aurora --single-branch \
-  https://github.com/midatm1234/aurora.git aurora-plugin
-cd aurora-plugin
-WORKFLOW_VENV="${XDG_CACHE_HOME:-$HOME/.cache}/aurora-air-pollution/venv"
-WORKFLOW_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/aurora/workflow.json"
-python3.12 scripts/bootstrap_workflow.py --venv "$WORKFLOW_VENV" --data
-"$WORKFLOW_VENV/bin/python" -m aurora_workflow --config "$WORKFLOW_CONFIG" \
-  configure --workspace "$HOME/aurora-air-pollution-work"
-AURORA_WORKFLOW_VENV="$WORKFLOW_VENV" AURORA_WORKFLOW_CONFIG="$WORKFLOW_CONFIG" \
-  bin/aurora-mcp --check
-claude plugin validate .
-claude plugin marketplace add .
+claude plugin marketplace add "midatm1234/aurora#agent_skills_to_finetune_aurora"
 claude plugin install aurora-air-pollution@aurora
 ```
 
-The official branch-aware remote form is `claude plugin marketplace add midatm1234/aurora#agent_skills_to_finetune_aurora`, followed by `claude plugin install aurora-air-pollution@aurora`. Configure ADS credentials only in a protected local `.cdsapirc` and manually accept CAMS terms. See the [Claude Code plugin runbook](docs/claude-code-plugin.md) for Docker, Claude Desktop, platform limits, resource approval, examples and tests.
+Start a new Claude Code session, or reload its plugins, and ask:
 
-Copy this handoff prompt into your local agent:
+> Set up this machine for the Aurora air-pollution workflow. Check the environment, available compute, existing datasets, checkpoints, and previous outputs. Prepare the lightweight setup and explain which workflow steps this machine can run.
 
-> Read `AGENTS.md`, `.agents/skills/msresearch-aurora-air-pollution/SKILL.md`, and `knowledge/index.md`. Inspect the checked-out commit, environment, available datasets, baseline outputs, trained checkpoints, and run manifests. Follow `docs/agent-workflow.md` to propose the necessary local setup and register the stdio MCP server. Prefer verified artifact reuse. Ask me to choose replay, resume, reproduce training, or evaluation and select the recipe/head. Use MCP to make a bounded plan, have me approve that exact plan in my terminal, and execute or recover it through MCP. Report actual validation, provenance, missing artifacts, and mixed/negative metrics honestly. Do not substitute weather weights or claim historical reproduction from synthetic tests.
+The launcher connects immediately with `setup_status` while preparing its minimal environment and default configuration outside the installed plugin. It reuses compatible environments and preserves existing settings. PyTorch, CAMS data packages, weights and datasets are deferred until you request those capabilities. You do not need to clone the repository or find Claude's plugin cache.
 
-Sharing this URL supplies code and recipes. The recipient supplies compute, credentials, data permissions, and any unpublished trained refinement checkpoint. The default CI uses synthetic CPU fixtures; it does not establish real forecast skill.
+**Confirm in the Claude Code session:** `/plugin` shows `aurora-air-pollution@aurora`; `/aurora-air-pollution:aurora-setup` is available; `/mcp` shows the bundled server connected. Ask the agent to call `setup_status`, then `inspect_environment`, `inspect_assets` and `list_runs`. Successful lightweight setup means `setup_status.state` is `ready`, inspection verifies this fork and reports your paths, and empty assets/runs are handled normally. Missing scientific packages are expected. If a client does not refresh tools after setup, reconnect the server or restart the session.
+
+The marketplace source selects the named branch; its plugin source is `./`, relative to that same branch checkout. There is no second unpinned repository fetch. The Claude Code VS Code extension shares CLI plugin installations; restart its session after installing. [Detailed setup and recovery](docs/claude-code-plugin.md).
+
+## Other agents
+
+For the checkout-based routes below, **run in a terminal**, then open that directory in the client:
+
+```bash
+git clone --branch agent_skills_to_finetune_aurora --single-branch \
+  https://github.com/midatm1234/aurora.git
+cd aurora
+bin/aurora-mcp --check
+```
+
+| Client | Installation | Skill entry point | MCP setup | Validation |
+| --- | --- | --- | --- | --- |
+| Claude Code CLI / VS Code extension | Marketplace above | Five namespaced `aurora-*` skills | Bundled plugin-manifest registration | CLI install and actual VS Code extension activation/inventory tested; authenticated chat untested |
+| Codex CLI / IDE extension | Open branch checkout | `.agents/skills/` and `AGENTS.md` | `codex mcp add aurora_air_pollution -- /absolute/path/aurora/bin/aurora-mcp` | CLI registration and SDK tests; IDE session untested |
+| GitHub Copilot, VS Code agent mode | Open branch checkout | `.agents/skills/`, `.github/copilot-instructions.md` | Copy [VS Code example](docs/clients/vscode-mcp.example.json) into `.vscode/mcp.json`; **MCP: List Servers** | Actual VS Code skill discovery and MCP calls tested; Copilot chat session untested |
+| Claude Desktop / other local MCP hosts | Branch checkout | Read `aurora://instructions` resource or supply canonical skill | [Local stdio example](docs/clients/claude-mcp.example.json), with absolute launcher path | SDK/resources tested; Desktop session untested |
+| ChatGPT / other GPT hosts | A host with access to the same execution machine | Explicit canonical instructions and OKF access | Local stdio-capable runtime, e.g. Codex; browser ChatGPT requires an additional remote transport/deployment | No bundled ChatGPT connector or HTTP server; [limitations](docs/agent-workflow.md#chatgpt-and-other-gpt-hosts) |
+
+[Client instructions, schemas and exact remaining checks](docs/agent-workflow.md#client-setup). Copilot CLI and GitHub cloud agents have different setup and resource requirements; VS Code configuration does not register their tools.
+
+## Common prompts
+
+- **New machine:** “Inspect this machine and existing Aurora data, assets and runs. Prepare lightweight setup and explain which capabilities are ready and which dependencies are missing.”
+- **Existing results:** “Analyze my existing Aurora outputs in `<path>` without training. Check manifests and matched samples, summarize metrics and plots, and retain negative results.”
+- **CAMS download:** “Prepare a bounded CAMS download plan for `no2-us-west-v1` over `<UTC dates>`. Check existing data, full backbone history, credentials presence, request count, bytes, storage and time limits. Show the plan before execution.”
+- **Baseline and refinement:** “Plan the Aurora baseline and `flow_matching_transformer` refinement for `no2-us-west-v1` on my available compute. Reuse verified assets; show GPU, time, storage and training bounds for terminal approval.” Other unified heads: `flow_matching_conv_unet`, `diffusion_unet`, `diffusion_transformer`; `none` preserves the baseline.
+- **Evaluation:** “Evaluate these baseline and refined forecasts against the same matched CAMS reference. Compare by variable, pressure level and forecast lead time in physical units, with coverage, exclusions, plots and provenance. Do not train.”
+- **Resume or reproduce:** “Inspect run `<run ID/path>` and its artifacts. Determine whether its checkpoint supports replay or full optimizer resume, or whether I need a new reproduction run. Preserve the recorded head, forcing contract and bounds; report missing artifacts.”
+
+Inspection and knowledge navigation run on CPU. Data acquisition/preparation needs additional data packages; CAMS downloads also require your ADS account, local credentials and accepted dataset terms. Evaluation of existing compatible arrays runs on CPU with scientific dependencies. Real baseline/refinement computation needs the appropriate scientific environment, model assets and Linux CUDA resources; historical replay additionally needs the original compatible refinement checkpoint. Sharing this branch does not share unpublished checkpoints.
+
+Scientific execution follows inspect → validate → bounded plan → **human terminal approval** → execute → evaluate/report. Setup success is not reproduction. Synthetic CPU checks establish workflow plumbing, not forecast performance; CAMS operational forecasts are a model reference, not observations.
+
+## Your files
+
+Defaults (XDG config/cache overrides are honored):
+
+| Location | Contents |
+| --- | --- |
+| `~/.config/aurora/launcher.json` | Optional persistent `workspace`, `venv`, `config` path choices |
+| `~/.config/aurora/workflow.json` | Validated local roots, permitted read roots and asset registry |
+| `~/.cache/aurora-air-pollution/venv-<Python>-<lock>` | Minimal environment; dependency updates get a separate environment |
+| `~/aurora-air-pollution-work/{data,cache,runs,state}` | Data, cached assets, outputs, jobs and approval state |
+| `~/.cdsapirc` or `CDSAPI_RC` | Your local ADS credentials; never paste them into chat |
+
+Ask the setup agent to inspect these paths before changing them. Reuse existing datasets/checkpoints through configured `read_roots` and asset records. A custom workflow configuration is preserved; its roots determine the actual data/output locations. [Path overrides and larger environments](docs/claude-code-plugin.md#paths-and-environments).
+
+## Troubleshooting and updates
+
+If the server is connected but workflow tools are absent, ask for `setup_status`: it reports progress, log location and recovery instructions. Fix package-index access or invalid local settings and call `setup_retry`; reconnect if necessary. If the server cannot connect at all, check Python 3.12–3.14 and `venv`/`pip` in the client's PATH, then restart the client. [Manual fallback and diagnostics](docs/claude-code-plugin.md#manual-fallback).
+
+**Run in a terminal** to update:
+
+```bash
+claude plugin marketplace update aurora
+claude plugin update aurora-air-pollution@aurora
+```
+
+Restart the session afterward. Plugin versions must increase when publishing changes so installed caches refresh. External settings, data and runs survive updates and uninstall.
+
+More detail: [Claude runbook](docs/claude-code-plugin.md) · [other agents and workflow approval](docs/agent-workflow.md) · [onboarding validation](docs/onboarding-validation.md) · [scientific inventory](docs/workflow-inventory.md) · [scientific implementation report](docs/workflow-implementation-report.md) · [OKF knowledge](knowledge/index.md).
+
+The upstream Aurora description, citation, examples and license follow. Its general weather example is separate from this branch's air-pollution workflow; use the workflow instructions above for CAMS and refinement work.
+
+---
 
 <img src="docs/gifs/high_res_2t.gif" alt="high resolution (0.1 degree) temperature at 2m predictions gif" width="150px">&nbsp;&nbsp;&nbsp;<img src="docs/gifs/no2.gif" alt="nitrogen dioxide predictions gif" width="150px">&nbsp;&nbsp;&nbsp;<img src="docs/gifs/wave_direction.gif" alt="ocean wave direction predictions gif" width="150px">&nbsp;&nbsp;&nbsp;<img src="docs/gifs/tc_tracks.gif" alt="tropical cyclone track predictions gif" width="220px">
 

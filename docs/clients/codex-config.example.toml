@@ -1,7 +1,6 @@
-# Merge this table into ~/.codex/config.toml after replacing both paths.
+# Merge into ~/.codex/config.toml after replacing the launcher path.
 [mcp_servers.aurora_air_pollution]
-command = "/absolute/path/aurora/.venv-workflow/bin/python"
-args = ["-m", "aurora_workflow.mcp_server", "--config", "/absolute/path/aurora-local.json"]
-cwd = "/absolute/path/aurora"
+command = "/absolute/path/aurora/bin/aurora-mcp"
+args = []
 startup_timeout_sec = 30
 tool_timeout_sec = 60
